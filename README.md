@@ -1,2 +1,2 @@
 # Econometrics-Example-Code
-Econometrics Day 1 Example Code
+Econometrics 2 - Time Series/Forecasting Stata Code
