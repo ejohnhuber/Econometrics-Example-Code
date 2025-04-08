@@ -1,0 +1,273 @@
+ECON 4633 Exam 1 Answer Key (STATA CODE)
+QUESTION 1
+clear all
+/*
+import excel "/Users/dekterrell/Dropbox/2025 Forecasting/Exam1/Used_Auto.xlsx", sheet("Monthly") firstrow
+*/
+import excel using "C:\Users\mdterre\Dropbox\2025 Forecasting\Exam1\Used_Auto.xlsx", sheet("Monthly") firstrow 
+
+* Format the new variable as a Stata date
+rename MRTSSM44112USN usedcar_sales
+format observation_date %td
+gen t=mofd(observation_date)
+format t %tm
+
+* drop missing observations
+drop if usedcar_sales ==.
+
+* Now set time series as as monthly data
+tsset t, monthly
+
+* graph the data
+tsline usedcar_sales, name("usedcar_sales")
+
+* run the linear trend model
+regress usedcar_sales t
+estat ic
+
+* add observations for forecast
+tsappend, add(48)
+* forecast using the model
+predict usedcar_sales_LT
+tsline usedcar_sales_LT || tsline usedcar_sales, name("LT_model")
+
+* generate time squared gen t=t^2 would work too
+gen t2=t*t
+
+* Estimate quadratic trend
+regress usedcar_sales t t2
+estat ic
+
+* forecast using the quadratic trend
+predict usedcar_sales_QT
+tsline usedcar_sales_QT || tsline usedcar_sales, name("QT_model")
+
+* Exponential trend in logs?
+gen ln_usedcar_sales=log(usedcar_sales)
+regress ln_usedcar_sales t
+
+* can't use the AIC and SIC because the dependent variable is different
+
+* forecast using the quadratic trend
+predict lnusedcar_saleshat
+gen usedcar_sales_ExpT = exp(lnusedcar_saleshat)
+tsline usedcar_sales_ExpT || tsline usedcar_sales, name("ExpT_model")
+
+* Now add seasonality using dummies
+gen tmp_date=dofm(t)
+format tmp_date %d
+gen Month=month(tmp_date)
+gen DJan=(Month==1)
+gen DFeb=(Month==2)
+gen DMarch=(Month==3)
+gen DApril=(Month==4)
+gen DMay=(Month==5)
+gen DJune=(Month==6)
+gen DJuly=(Month==7)
+gen DAug=(Month==8)
+gen DSept=(Month==9)
+gen DOct=(Month==10)
+gen DNov=(Month==11)
+gen DDec=(Month==12)
+
+* run the linear trend model with seasonal dummies
+regress usedcar_sales t DJan DMarch DApril DMay DJune DJuly DAug DSept DOct DNov DDec
+estat ic
+
+* forecast using the model
+predict usedcar_sales_LTS
+tsline usedcar_sales_LTS || tsline usedcar_sales, name("LTS_model")
+
+* run the quadratic trend model with seasonal dummies
+regress usedcar_sales t t2 DJan DMarch DApril DMay DJune DJuly DAug DSept DOct DNov DDec
+estat ic
+
+* forecast using the model
+predict usedcar_sales_QTS
+tsline usedcar_sales_QTS || tsline usedcar_sales, name("QTS_model")
+
+* Exponential trend in logs?
+regress ln_usedcar_sales t DJan DMarch DApril DMay DJune DJuly DAug DSept DOct DNov DDec
+
+* forecast using the quadratic trend
+predict lnusedcar_saleshat_Seas
+gen usedcar_sales_ExpT_Seas = exp(lnusedcar_saleshat_Seas)
+tsline usedcar_sales_ExpT_Seas || tsline usedcar_sales, name("ExpTS_model")
+
+// Do a simple ratio to moving average seasonal adjustment
+* Start with a moving average 
+tssmooth ma MA_Sales= usedcar_sales, window(6 1 6)
+* Compute the ratio to moving average
+gen ratio=usedcar_sales/MA_Sales
+* graph it
+tsline ratio
+* Now compute the average impact in each monthly
+sort Month
+* compute the average ratio to moving average for each month
+by Month: egen est_seasonal=mean(ratio)
+* show the results
+by Month: summarize est_seasonal
+
+* create seasonally adjusted usedcar sales
+gen usedcar_sales_sa=usedcar_sales/est_seasonal
+
+tsline usedcar_sales_sa, name("Seasonally_adjusted")
+
+* Run three models with comparable dependent variable
+reg usedcar_sales_sa t
+estat ic
+
+reg usedcar_sales_sa t t2
+estat ic
+
+nl (usedcar_sales_sa = {alpha}*exp({beta}*t))
+estat ic
+
+* Try the information criteria in logs, what goes wrong
+* Different dependent variable, not valid !!!!!!
+gen lnusedcar_sale=log(usedcar_sales)
+regress lnusedcar_sale t
+estat ic
+
+gen coviddummy=0
+replace coviddummy=1 if t==tm(2020m4)
+nl (usedcar_sales_sa = {alpha}*exp({beta}*t + {gamma*coviddummy}))
+
+* Use last model with lowest AIC and BIC to forecast
+predict usedcar_sales_sa_hat
+
+* plot it
+tsline usedcar_sales_sa_hat, name(seasonal_results)
+
+* Add seasonal factors back into forecast
+gen usedcar_sales_hat=usedcar_sales_sa_hat*est_seasonal
+tsline usedcar_sales usedcar_sales_hat, name("forecast")
+
+
+
+
+
+
+
+
+
+QUESTION 2
+clear all
+cd "C:\Teach\Econ 4633"
+set obs 40000
+gen t=_n
+tsset t
+gen epsilon=rnormal()
+
+* generate an ARMA(1,1)
+gen y1=0
+replace y1= .9*y1[_n-1]+epsilon+.9*epsilon[_n-1] if t>1
+corrgram y1
+
+* generate a ma(1)
+gen y2=epsilon-.9*L.epsilon
+corrgram y2
+gen epsilon3=rnormal()
+
+* generate white noise
+gen y3=epsilon3
+corrgram y3
+
+* generate an AR(2)
+gen y4=epsilon3
+forvalues t=3(1)40000{
+quietly{
+replace y4 = 1.4* y4[_n-1] - .45 *y4[_n-2] + epsilon3 in `t'
+}
+}
+corrgram y4
+gen test=0
+replace test=1.4*L.test - .45*L2.test+epsilon if t>2
+corrgram test
+* generate an AR(1)
+gen epsilon2=rnormal()
+gen y5=0
+replace y5=-.9*L.y5+epsilon2 if t>1
+corrgram y5
+* generate an MA(4)
+gen y6=epsilon2+.6*L.epsilon2-.4*L2.epsilon2+.2*L3.epsilon2
+corrgram y6
+
+drop epsilon epsilon3 epsilon2 test
+
+save q2, replace
+
+
+
+
+
+
+
+QUESTION 3
+clear all                    
+
+* import quarterly SEASONALLY ADJUSTED REAL GDP
+import excel "/Users/dekterrell/Dropbox/2025 Forecasting/Exam1_q3/GDPC1.xlsx", sheet("Quarterly") firstrow
+
+
+* format the dates and declare t as quarterly 
+format observation_date %td
+gen t=qofd(observation_date)
+format t %tq
+tsset t
+
+tsline GDPC1, name("Raw_GDP")
+
+* add observations for a forecast
+tsappend, add(12)
+
+* Estimate trend models
+
+regress GDPC1 t
+estat ic
+gen t2=t^2
+regress GDPC1 t t2
+estat ic
+predict rgdp_trend_hat
+tsline GDPC1 rgdp_trend_hat, name("Raw_GDP_withQT")
+
+predict cycles, resid
+tsline cycles, name("cycles")
+
+nl (GDPC1={alpha}*exp({beta}*t))
+estat ic
+
+* check the correlogram
+corrgram cycles
+
+* Step 1: Estimate AR(1) model (ARIMA(1,0,0))
+arima cycles, ar(1)
+
+predict residuals, resid
+corrgram residuals
+* estimates store model1
+estimates store model1
+
+
+* Step 2: Estimate AR(2) model (AR(1/2))
+arima cycles, ar(1/2)
+* estimates store model1
+estimates store model1
+predict residuals2, resid
+corrgram residuals2
+
+* Step 4: Set up forecasting environment
+forecast create myforecast, replace
+forecast estimates model1
+
+
+* Step 5: Forecast next 12 periods
+forecast solve, periods(12) suffix(_hat) actuals begin(tq(2025q1))
+
+* Step 6: View the forecast results
+tsline cycles_hat cycles, name("cycle_forecast", replace)
+browse t cycles_hat
+
+gen rgdp_hat=rgdp_trend_hat+cycles_hat
+
+tsline rgdp_hat rgdp_trend_hat || tsline GDPC1, name("final_forecast", replace)
